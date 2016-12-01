@@ -139,6 +139,43 @@ app.post('/feeditem',validate({ body: StatusUpdateSchema }),function(req, res) {
   }
 });
 
+function postComment(feedItemId, author, contents) {
+
+  var feedItem = readDocument('feedItems', feedItemId);
+  feedItem.comments.push({
+    "author": author,
+    "contents": contents,
+    "postDate": new Date().getTime(),
+    "likeCounter": []
+  });
+  var item = writeDocument('feedItems', feedItem);
+
+  return item;
+}
+
+var CommentSchema = require('./schemas/comment.json');
+// `POST /feeditem { userId: user, location: location, contents: contents  }`
+app.post('/feeditem/:feedItemid/commentThread',validate({ body: CommentSchema }),function(req, res) {
+  // If this function runs, `req.body` passed JSON validation!
+  var body = req.body;
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+  // Check if requester is authorized to post this status update.
+  // (The requester must be the author of the update.)
+  if(fromUser === body.userId) {
+    var updatedItem = postComment(req.params.feedItemid,body.userId,body.contents);
+    // When POST creates a new resource, we should tell the client about it
+    // in the 'Location' header and use status code 201.
+    res.status(201);
+    res.set('Location', '/feeditem/' + updatedItem._id);
+    // Send the update!
+    res.send(getFeedItemSync(updatedItem));
+  }
+  else{
+    // 401: Unauthorized.
+    res.status(401).end();
+  }
+});
+
 app.post('/resetdb',function(req, res) {
   console.log("Resetting database...");
   // This is a debug route, so don't do any validation.
@@ -223,6 +260,29 @@ app.put('/feeditem/:feeditemid/likelist/:userid',function(req, res) {
   }
 });
 
+app.put('/feeditem/:feeditemid/commentThread/:comment/likelist/:userid',function(req, res) {
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+  // Convert params from string to number.
+  var feedItemId = parseInt(req.params.feeditemid, 10);
+  var userId = parseInt(req.params.userid, 10);
+  var commentId = parseInt(req.params.comment, 10);
+  if(fromUser === userId) {
+    var feedItem = readDocument('feedItems', feedItemId);
+    // Add to likeCounter if not already present.
+    if(feedItem.comments[commentId].likeCounter.indexOf(userId) === -1) {
+      feedItem.comments[commentId].likeCounter.push(userId);
+      writeDocument('feedItems', feedItem);
+    }
+    // Return a resolved version of the likeCounter
+    res.send(feedItem.comments[commentId].likeCounter.map((userId) =>
+    readDocument('users', userId)));
+  }
+  else{
+    // 401: Unauthorized.
+    res.status(401).end();
+  }
+});
+
 app.delete('/feeditem/:feeditemid/likelist/:userid',function(req, res) {
   var fromUser = getUserIdFromToken(req.get('Authorization'));
   // Convert params from string to number.
@@ -240,6 +300,32 @@ app.delete('/feeditem/:feeditemid/likelist/:userid',function(req, res) {
     // Note that this request succeeds even if the
     // user already unliked the request!
     res.send(feedItem.likeCounter.map((userId) =>
+    readDocument('users', userId)));
+  }
+  else{
+    // 401: Unauthorized.
+    res.status(401).end();
+  }
+});
+
+app.delete('/feeditem/:feeditemid/commentThread/:comment/likelist/:userid',function(req, res) {
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+  // Convert params from string to number.
+  var feedItemId = parseInt(req.params.feeditemid, 10);
+  var userId = parseInt(req.params.userid, 10);
+  var commentId = parseInt(req.params.comment, 10);
+  if(fromUser === userId) {
+    var feedItem = readDocument('feedItems', feedItemId);
+    var likeIndex = feedItem.comments[commentId].likeCounter.indexOf(userId);
+    // Remove from likeCounter if present
+    if(likeIndex !== -1) {
+      feedItem.comments[commentId].likeCounter.splice(likeIndex, 1);
+      writeDocument('feedItems', feedItem);
+    }
+    // Return a resolved version of the likeCounter
+    // Note that this request succeeds even if the
+    // user already unliked the request!
+    res.send(feedItem.comments[commentId].likeCounter.map((userId) =>
     readDocument('users', userId)));
   }
   else{
